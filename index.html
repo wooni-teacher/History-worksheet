@@ -175,7 +175,10 @@ table.grid .vh{text-align:center;width:1%}
 .roster .nm{font-family:var(--display);font-size:19px}
 .pw-input{font:inherit;font-size:20px;letter-spacing:.2em;padding:8px 12px;border:1.5px solid var(--line);border-radius:8px;background:var(--wall);color:var(--ink)}
 .err{color:var(--no);margin:0;min-height:1.2em;font-size:14px}
-.dash-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.dash-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.dash-btns{display:flex;gap:6px}
+.dash-sub{margin:4px 0 0;font-family:var(--display);font-weight:400;font-size:18px}
+.dash-off{margin:0;padding:14px;border:1.5px dashed var(--line);border-radius:8px;color:var(--muted)}
 .dash-wrap{overflow:auto;max-height:70vh}
 table.dash{min-width:820px;font-size:14px}
 table.dash th,table.dash td{padding:5px 6px;text-align:center;line-height:1.3;font-variant-numeric:tabular-nums}
@@ -253,8 +256,7 @@ td.sum{font-weight:700}
     <button class="link" id="btn-switch" hidden>이름 바꾸기</button>
     <span class="save" id="save-st" aria-live="polite"></span>
     <span class="who-gap"></span>
-    <button class="link" id="btn-dash" hidden>선생님 화면</button>
-    <button class="link" id="btn-teacher">선생님</button>
+    <button class="link" id="btn-teacher">선생님 화면</button>
   </div>
   <div class="viewing" id="viewing" hidden>
     <span id="viewing-txt"></span>
@@ -266,8 +268,7 @@ td.sum{font-weight:700}
   </div>
   <div class="bar">
     <button class="btn primary" id="btn-check">채점하기</button>
-    <button class="btn" id="btn-hint">힌트 (첫 글자)</button>
-    <button class="btn" id="btn-show" aria-pressed="false" hidden>정답 보기</button>
+    <button class="btn" id="btn-hint">힌트 1 · 첫 글자</button>
     <button class="btn" id="btn-reset">다시 하기</button>
     <div class="score" aria-live="polite"><span id="score-txt">0 / 0</span><span class="meter"><i id="meter"></i></span></div>
   </div>
@@ -301,7 +302,8 @@ td.sum{font-weight:700}
 
 <div class="ov" id="dash" hidden role="dialog" aria-modal="true" aria-labelledby="dash-title">
   <div class="ov-card wide">
-    <div class="dash-head"><h2 id="dash-title">우리 반 학습지 현황</h2><button class="btn" id="dash-close">닫기</button></div>
+    <div class="dash-head"><h2 id="dash-title">선생님 화면</h2><span class="dash-btns"><button class="btn primary" id="btn-key">정답지 보기</button><button class="btn" id="dash-close">닫기</button></span></div>
+    <h3 class="dash-sub">우리 반 학습지 현황</h3>
     <p class="ov-sub">칸의 숫자는 맞힌 빈칸 수예요. 학생 이름을 누르면 그 학생이 쓴 답을 볼 수 있어요.</p>
     <div class="dash-wrap"><table class="dash" id="dash-table"></table></div>
     <p class="legend"><span class="sw full"></span>다 맞힘 <span class="sw part"></span>하는 중 <span class="sw none"></span>아직 안 함</p>
@@ -886,12 +888,31 @@ const EVENTS = [
     if (first) first.focus();
   }
   $('#btn-check').onclick = check;
-  $('#btn-hint').onclick = () => evaluate(active()).forEach((v, b) => { if (!v) b.placeholder = [...b.dataset.d][0] + '…'; });
+  const HINT_LABEL = ['힌트 1 · 첫 글자', '힌트 2 · 글자 수', '힌트를 다 썼어요'];
+  const hintLevel = () => +(page().dataset.hint || 0);
+  const showHintLabel = () => { const h = hintLevel(); $('#btn-hint').textContent = HINT_LABEL[h]; $('#btn-hint').disabled = h >= 2; };
+  function applyHints(sec) {
+    const h = +(sec.dataset.hint || 0);
+    evaluate($$('.blank', sec)).forEach((v, b) => {
+      if (v || !h) { b.placeholder = ''; b.removeAttribute('title'); return; }
+      const ch = [...b.dataset.d];
+      if (ch.length === 1) { b.placeholder = '○'; b.title = '1글자'; return; }
+      if (h === 1) { b.placeholder = ch[0] + '…'; return; }
+      const n = ch.filter(c => c !== ' ').length;
+      b.placeholder = ch.map((c, k) => k === 0 ? c : c === ' ' ? ' ' : '○').join('');
+      b.title = `${n}글자`;
+    });
+  }
+  $('#btn-hint').onclick = () => {
+    const sec = page();
+    sec.dataset.hint = Math.min(2, hintLevel() + 1);
+    applyHints(sec); showHintLabel();
+    const first = active().find(b => !b.classList.contains('ok') && !b.value);
+    if (first) first.focus();
+  };
 
   function setShow(on) {
     showing = on;
-    $('#btn-show').setAttribute('aria-pressed', on);
-    $('#btn-show').textContent = on ? '정답 숨기기' : '정답 보기';
     $$('.blank').forEach(b => {
       if (on) { b.dataset.prev = b.value; b.value = b.dataset.d; b.classList.add('shown'); b.readOnly = true; }
       else if (b.classList.contains('shown')) { b.value = b.dataset.prev || ''; b.classList.remove('shown'); b.readOnly = false; }
@@ -899,10 +920,10 @@ const EVENTS = [
     $$('.page').forEach(refreshSheet);
     refresh();
   }
-  $('#btn-show').onclick = () => setShow(!showing);
   $('#btn-reset').onclick = () => {
     if (showing) setShow(false);
-    active().forEach(b => { b.value = ''; b.placeholder = ''; b.classList.remove('ok', 'no'); });
+    active().forEach(b => { b.value = ''; b.placeholder = ''; b.removeAttribute('title'); b.classList.remove('ok', 'no'); });
+    page().dataset.hint = 0; showHintLabel();
     refresh();
     saveNow(page());
     active()[0]?.focus();
@@ -926,6 +947,7 @@ const EVENTS = [
     const sc = $('.hbar-scroll'), on = $('.seg.on');
     if (on) sc.scrollLeft = on.offsetLeft - sc.clientWidth / 2 + on.offsetWidth / 2;
     try { history.replaceState(null, '', '#' + s.id); } catch (e) {}
+    showHintLabel();
     refresh();
     if (scroll) window.scrollTo({ top: 0 });
   }
@@ -966,11 +988,14 @@ const EVENTS = [
   }
   function saveNow(sec) {
     if (!db || !me || viewing) return;
-    clearTimeout(timers[sec.id]);
+    clearTimeout(timers[sec.id]); timers[sec.id] = null;
     setStatus('저장하는 중…');
     db.ref(`${DB_PATH}/${me.key}/${sheetOf(sec)}`).set(payload(sec))
       .then(() => setStatus('저장됨 ✓'))
       .catch(() => setStatus('저장이 안 됐어요. 인터넷 연결을 확인해 주세요.', true));
+  }
+  function flushSaves() {
+    Object.keys(timers).forEach(id => { if (timers[id]) { const sec = $('#' + id); timers[id] = null; saveNow(sec); } });
   }
   function queueSave(sec) {
     if (!db || !me || viewing) return;
@@ -982,10 +1007,12 @@ const EVENTS = [
     if (showing) setShow(false);
     $$('.page').forEach(sec => {
       const arr = data?.[sheetOf(sec)]?.a || [];
-      $$('.blank', sec).forEach((b, i) => { b.value = arr[i] || ''; b.placeholder = ''; b.classList.remove('ok', 'no'); b.readOnly = !!viewing; });
+      $$('.blank', sec).forEach((b, i) => { b.value = arr[i] || ''; b.placeholder = ''; b.removeAttribute('title'); b.classList.remove('ok', 'no'); b.readOnly = !!viewing; });
+      sec.dataset.hint = 0;
       refreshSheet(sec);
     });
     refresh();
+    showHintLabel();
   }
 
   // 이름 고르기
@@ -1001,7 +1028,7 @@ const EVENTS = [
       .then(snap => { fillAll(snap.val()); setStatus(snap.exists() ? '저장된 답을 불러왔어요' : ''); })
       .catch(() => setStatus('기록을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.', true));
   }
-  function showGate() { me = null; fillAll(null); setStatus(''); $('#me-badge').hidden = $('#btn-switch').hidden = true; $('#gate').hidden = false; }
+  function showGate() { flushSaves(); me = null; fillAll(null); setStatus(''); $('#me-badge').hidden = $('#btn-switch').hidden = true; $('#gate').hidden = false; }
   $('#btn-switch').onclick = showGate;
 
   // 선생님 확인
@@ -1015,13 +1042,11 @@ const EVENTS = [
     e.preventDefault();
     if ($('#pw-input').value !== ADMIN_PW) { $('#pw-err').textContent = '비밀번호가 틀렸어요.'; return; }
     teacher = true; $('#pw').hidden = true;
-    $('#btn-show').hidden = false; $('#btn-teacher').hidden = true;
-    $('#btn-dash').hidden = !db;
     const n = afterPw; afterPw = null; n && n();
   };
   $('#pw-cancel').onclick = () => { $('#pw').hidden = true; afterPw = null; };
-  $('#btn-teacher').onclick = () => askPw(() => {});
-  $('#gate-teacher').onclick = () => askPw(() => { $('#gate').hidden = true; });
+  $('#btn-teacher').onclick = () => askPw(openDash);
+  $('#gate-teacher').onclick = () => askPw(() => { $('#gate').hidden = true; openDash(); });
 
   // 선생님 화면
   const totals = SHEETS.map(s => $$('.blank', $('#pg-' + s.id)).length);
@@ -1043,17 +1068,34 @@ const EVENTS = [
     $('#dash-table').innerHTML = head + `<tbody>${rows}</tbody>`;
     $$('#dash-table tbody button').forEach(b => b.onclick = () => viewStudent(+b.dataset.i, all[keyOf(+b.dataset.i)]));
   }
-  $('#btn-dash').onclick = () => askPw(() => {
+  function openDash() {
     $('#dash').hidden = false;
+    if (!db) { $('.dash-wrap').innerHTML = '<p class="dash-off">학생 기록은 GitHub 페이지(wooni-teacher.github.io/history-worksheet)에서만 볼 수 있어요. 정답지는 여기서도 볼 수 있어요.</p>'; return; }
+    if (dashRef) return;
     dashRef = db.ref(DB_PATH);
     dashRef.on('value', snap => drawDash(snap.val()), () => { $('#dash-table').innerHTML = '<tr><td>기록을 불러오지 못했어요.</td></tr>'; });
-  });
+  }
+  // 정답지: 선생님 화면에서만
+  $('#btn-key').onclick = () => {
+    flushSaves();
+    closeDash();
+    if (viewing && !viewing.key) return;
+    if (viewing) { viewing = null; fillAll(null); }
+    viewing = { key: null };
+    $('#viewing').hidden = false;
+    $('#viewing-txt').textContent = '정답지를 보는 중이에요 · 학생들에게 보여 주지 않도록 조심하세요';
+    $('#btn-del').hidden = true; $('#btn-del-ok').hidden = true;
+    setShow(true);
+    window.scrollTo({ top: 0 });
+  };
   const closeDash = () => { $('#dash').hidden = true; if (dashRef) { dashRef.off(); dashRef = null; } };
   $('#dash-close').onclick = closeDash;
 
   // 학생 답 보기
   function viewStudent(i, data) {
+    flushSaves();
     closeDash();
+    if (showing) setShow(false);
     viewing = { i, key: keyOf(i) };
     $('#viewing').hidden = false;
     $('#viewing-txt').textContent = `${i + 1}번 ${ROSTER[i]} 학생이 쓴 답을 보는 중이에요`;
@@ -1062,6 +1104,7 @@ const EVENTS = [
     window.scrollTo({ top: 0 });
   }
   function endView() {
+    if (showing) setShow(false);
     viewing = null; $('#viewing').hidden = true;
     if (me) login(me.i); else fillAll(null);
   }
