@@ -1255,9 +1255,11 @@ const EVENTS = [
     appId: "1:617782083798:web:c1d15b5e21c3a9be0e2de1"
   };
   const DB_PATH = 'classroom/sahoe_yeoksa/students';
-  const ADMIN_PW = '000000';
-  const ROSTER = ['학생1','학생2','학생3','학생4','학생5','학생6','학생7','학생8','학생9','학생10','학생11','학생12','학생13','학생14','학생15'];
-  const keyOf = i => `${i + 1}_${ROSTER[i]}`;
+  const ADMIN_PW_H = '9610b9d881109d9cce2f49ad20e33d4c9208b6d3ff2fde06b0ab701150fca121'; /* 선생님 비밀번호는 원문 대신 해시만 (sha256('hw|비밀번호')) */
+  const ROSTER_N = 15; /* 학생 이름은 코드에 넣지 않아요 · 선생님 기기에서만 이름을 적어 두면(이 기기에만 저장) 선생님 화면에 보여요 */
+  const ROSTER = (() => { let a = []; try { a = JSON.parse(localStorage.getItem('hw-roster') || '[]'); } catch (e) {} return Array.from({ length: ROSTER_N }, (_, i) => String(a[i] || '').slice(0, 10)); })();
+  const keyOf = i => `n${i + 1}`;
+  const sha = async t => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map(b => b.toString(16).padStart(2, '0')).join('');
 
   let db = null;
   try { if (window.firebase) { firebase.initializeApp(FIREBASE_CONFIG); db = firebase.database(); } } catch (e) { db = null; }
@@ -1303,12 +1305,12 @@ const EVENTS = [
   }
 
   // 이름 고르기
-  $('#roster').innerHTML = ROSTER.map((n, i) => `<button type="button" data-i="${i}"><span class="rn">${i + 1}번</span><span class="nm">${n}</span></button>`).join('');
+  $('#roster').innerHTML = ROSTER.map((n, i) => `<button type="button" data-i="${i}"><span class="rn">${i + 1}번</span></button>`).join('');
   $$('#roster button').forEach(b => b.onclick = () => login(+b.dataset.i));
   function login(i) {
-    me = { i, key: keyOf(i), name: ROSTER[i] };
+    me = { i, key: keyOf(i), name: '' };
     $('#gate').hidden = true;
-    $('#me-badge').hidden = false; $('#me-badge').textContent = `${i + 1}번 ${me.name}`;
+    $('#me-badge').hidden = false; $('#me-badge').textContent = `${i + 1}번`;
     $('#btn-switch').hidden = false;
     setStatus('불러오는 중…');
     db.ref(`${DB_PATH}/${me.key}`).once('value')
@@ -1325,9 +1327,9 @@ const EVENTS = [
     afterPw = next; $('#pw-err').textContent = ''; $('#pw-input').value = '';
     $('#pw').hidden = false; setTimeout(() => $('#pw-input').focus(), 30);
   }
-  $('#pw-form').onsubmit = e => {
+  $('#pw-form').onsubmit = async e => {
     e.preventDefault();
-    if ($('#pw-input').value !== ADMIN_PW) { $('#pw-err').textContent = '비밀번호가 틀렸어요.'; return; }
+    if (await sha('hw|' + $('#pw-input').value) !== ADMIN_PW_H) { $('#pw-err').textContent = '비밀번호가 틀렸어요.'; return; }
     teacher = true; $('#pw').hidden = true;
     const n = afterPw; afterPw = null; n && n();
   };
@@ -1350,7 +1352,7 @@ const EVENTS = [
         sum += r.ok || 0;
         return `<td class="${r.ok >= totals[k] ? 'full' : 'part'}">${r.ok}/${totals[k]}</td>`;
       }).join('');
-      return `<tr><th><button type="button" data-i="${i}">${i + 1}. ${n}</button></th>${cells}<td class="sum">${Math.round(sum / allTotal * 100)}%</td></tr>`;
+      return `<tr><th><button type="button" data-i="${i}">${i + 1}번${n ? ' ' + n : ''}</button></th>${cells}<td class="sum">${Math.round(sum / allTotal * 100)}%</td></tr>`;
     }).join('');
     $('#dash-table').innerHTML = head + `<tbody>${rows}</tbody>`;
     $$('#dash-table tbody button').forEach(b => b.onclick = () => viewStudent(+b.dataset.i, all[keyOf(+b.dataset.i)]));
@@ -1360,6 +1362,15 @@ const EVENTS = [
     if (!db) { $('.dash-wrap').innerHTML = '<p class="dash-off">학생 기록은 GitHub 페이지(wooni-teacher.github.io/history-worksheet)에서만 볼 수 있어요. 정답지는 여기서도 볼 수 있어요.</p>'; return; }
     if (dashRef) return;
     dashRef = db.ref(DB_PATH);
+    db.ref(DB_PATH).once('value').then(snap => { /* 예전 기록(번호_이름 키)을 번호 키(n번호)로 옮기고 이름 키는 지워요 */
+      const all = snap.val() || {}, up = {};
+      for (const [k, v] of Object.entries(all)) { const m = /^(\d+)_/.exec(k); if (!m) continue; const nk = `n${+m[1]}`; if (!all[nk] && !up[nk]) up[nk] = v; up[k] = null; }
+      if (Object.keys(up).length) db.ref(DB_PATH).update(up).then(() => setStatus('예전 기록의 이름을 지우고 번호로 옮겼어요')).catch(() => {});
+    }).catch(() => {});
+    if (!$('#roster-ed')) { const d = document.createElement('details'); d.id = 'roster-ed'; d.style.cssText = 'margin:6px 0;font-size:14px';
+      d.innerHTML = '<summary>📝 이름 명단 적기 (이 기기에만 저장 · 서버와 코드에는 안 올라가요)</summary><textarea id="roster-ta" rows="3" style="width:100%;font:inherit" placeholder="1번부터 쉼표로: 가람, 나래, …"></textarea><button type="button" class="btn" id="roster-save">저장</button>';
+      $('.dash-wrap').before(d); $('#roster-ta').value = ROSTER.filter(Boolean).length ? ROSTER.join(', ') : '';
+      $('#roster-save').onclick = () => { const a = $('#roster-ta').value.split(/[,\n]/).map(x => x.trim()).slice(0, ROSTER_N); try { localStorage.setItem('hw-roster', JSON.stringify(a)); } catch (e) {} for (let i = 0; i < ROSTER_N; i++) ROSTER[i] = String(a[i] || '').slice(0, 10); dashRef && dashRef.once('value', s2 => drawDash(s2.val())); }; }
     dashRef.on('value', snap => drawDash(snap.val()), () => { $('#dash-table').innerHTML = '<tr><td>기록을 불러오지 못했어요.</td></tr>'; });
   }
   // 정답지: 선생님 화면에서만
@@ -1385,7 +1396,7 @@ const EVENTS = [
     if (showing) setShow(false);
     viewing = { i, key: keyOf(i) };
     $('#viewing').hidden = false;
-    $('#viewing-txt').textContent = `${i + 1}번 ${ROSTER[i]} 학생이 쓴 답을 보는 중이에요`;
+    $('#viewing-txt').textContent = `${i + 1}번${ROSTER[i] ? ' ' + ROSTER[i] : ''} 학생이 쓴 답을 보는 중이에요`;
     $('#btn-del').hidden = false; $('#btn-del-ok').hidden = true;
     fillAll(data);
     window.scrollTo({ top: 0 });
